@@ -434,7 +434,7 @@
   scene.fog=new THREE.Fog(0x0a0c10, 26, 85);
 
   var camera=new THREE.PerspectiveCamera(68, window.innerWidth/window.innerHeight, 0.1, 300);
-  camera.position.set(0, 4.6, 7.2);
+  camera.position.set(0, 5.9, 9.4);
 
   var ambient=new THREE.AmbientLight(0xffd9a0, 0.5); scene.add(ambient);
   var hemi=new THREE.HemisphereLight(0xbdd3ff, 0x1a2418, 0.35); scene.add(hemi);
@@ -931,27 +931,43 @@
     }
   }
 
-  // ---------- INTRO CINEMATIC (menu cell → breakout → camera sweep → run) ----------
-  var intro={t:0, move:0, burstDone:false, agentsOut:false};
+  // ---------- INTRO CINEMATIC (menu cell → breakout → walk-out → notice → run) ----------
+  // The alien faces his direction of travel at EVERY moment. Out of the cell
+  // is +Z (toward the menu camera): he busts out, WALKS out calmly, the agents
+  // clock him, then he bolts straight past the camera. The camera stays on its
+  // post and PANS in place until it is looking at his back; only then does the
+  // world mirror (rebase) so the chase continues down the track, and the
+  // camera eases into — and stops at — the standard chase framing behind him.
+  var intro={t:0, move:0, burstDone:false, noticed:false, rebased:false, blend:1, runPhase:0, agentGo:false,
+             camFrom:new THREE.Vector3(), lookFrom:new THREE.Vector3(0,1.3,0), fovFrom:68};
+  var introTrack=new THREE.Vector3(0,1.25,-0.3);
   var introHint=document.getElementById('introHint');
   function beginIntro(){
     STATE='intro';
-    intro.t=0; intro.move=0; intro.burstDone=false; intro.agentsOut=false;
+    intro.t=0; intro.move=0; intro.burstDone=false; intro.noticed=false; intro.rebased=false; intro.blend=1; intro.runPhase=0; intro.agentGo=false;
+    introTrack.set(0,1.25,-0.3);
     cellMode='intro'; cellGroup.visible=true; cellGroup.position.set(0,0,0);
     setCellState('closed');
     agentL.visible=false; agentR.visible=false;
     hud.classList.remove('on');
     introHint.classList.add('on');
   }
+  function introAgentPose(ag, ph, amp){
+    if(ag.userData.legs){ ag.userData.legs[0].rotation.x=Math.sin(ph)*amp; ag.userData.legs[1].rotation.x=-Math.sin(ph)*amp; ag.userData.arms[0].rotation.x=-Math.sin(ph)*amp*0.85; ag.userData.arms[1].rotation.x=Math.sin(ph)*amp*0.85; }
+  }
   function stepIntro(dt){
     intro.t+=dt; var T=intro.t;
     intro.move=0;
+    var noticePhase=(T>=2.75 && T<3.5);
     var alarmRate=T<0.8?7:26;
     var wl=(Math.sin(T*alarmRate)>0)?2.6:0.15;
     for(var i=0;i<cellWarnMats.length;i++) cellWarnMats[i].emissiveIntensity=wl;
     if(T<1.15){
       redLight.intensity=(Math.sin(T*alarmRate)>0)?1.1:0.1;
       redLight.position.set(0,3.4,3.2);
+    } else if(noticePhase){
+      redLight.intensity=(Math.sin(T*30)>0)?1.7:0.15;
+      redLight.position.set(0,3.2,2.8);
     } else redLight.intensity=Math.max(0, redLight.intensity-dt*3);
     if(T<0.8){
       // Alarm phase: the field flickers, sparks spit, the alien presses at the bars
@@ -977,47 +993,109 @@
       alien.position.set(0,0.02,-0.3);
       alien.scale.y=0.84;
       if(alien.userData.arms){ alien.userData.arms[0].rotation.x=-0.4; alien.userData.arms[1].rotation.x=-0.4; }
-    } else {
-      // Burst out, turn, and take off down the track
+    } else if(T<2.75){
+      // WALK OUT — calm, normal pace, facing the way he moves (+Z, out the door)
       cellField.visible=false; cellBars.visible=false;
       alien.scale.y += (1-alien.scale.y)*Math.min(1,dt*10);
-      var runP=clamp((T-1.2)/0.65,0,1);
-      var sweepP=smooth01(clamp((T-1.85)/1.05,0,1));
-      var ez=1-Math.pow(1-runP,2);
-      var az=-0.3 + 2.05*ez;
-      az += (0-az)*sweepP;
-      alien.position.set(0, 0.02+Math.abs(Math.sin(T*11))*0.05*runP, az);
-      alien.rotation.y=Math.PI*sweepP;
-      alien.rotation.x=-0.10*sweepP;
-      alien.rotation.z=0;
-      var amp=0.85*clamp(runP+sweepP,0,1);
-      var sw=Math.sin(T*11.5)*amp;
-      if(alien.userData.legs){ alien.userData.legs[0].rotation.x=sw; alien.userData.legs[1].rotation.x=-sw; alien.userData.arms[0].rotation.x=-sw*0.9; alien.userData.arms[1].rotation.x=sw*0.9; }
-      if(alien.userData.head) alien.userData.head.rotation.y=0;
-      if(T>1.45 && !intro.agentsOut){
-        intro.agentsOut=true;
+      var wp=clamp((T-1.2)/1.55,0,1);
+      var wz=-0.3 + 3.05*wp;
+      var wph=T*5.6, wamp=0.36;
+      alien.position.set(0, 0.02+Math.abs(Math.sin(wph))*0.035, wz);
+      alien.rotation.set(0.03, 0, 0);
+      if(alien.userData.legs){ alien.userData.legs[0].rotation.x=Math.sin(wph)*wamp; alien.userData.legs[1].rotation.x=-Math.sin(wph)*wamp; alien.userData.arms[0].rotation.x=-Math.sin(wph)*wamp*0.75; alien.userData.arms[1].rotation.x=Math.sin(wph)*wamp*0.75; }
+      if(alien.userData.head){ alien.userData.head.rotation.y=Math.sin(T*0.8)*0.16; alien.userData.head.rotation.x=0; }
+    } else if(T<3.5){
+      // NOTICE — the agents spill to the doorway and clock him; he freezes mid-step and twists back to look
+      var np=clamp((T-2.75)/0.75,0,1);
+      if(!intro.noticed){
+        intro.noticed=true;
         agentL.visible=true; agentR.visible=true;
-        agentL.position.set(-0.85,0,1.1); agentR.position.set(0.85,0,1.5);
+        agentL.position.set(-0.85,0,0.9); agentR.position.set(0.85,0,1.25);
+        agentL.rotation.set(0,0,0); agentR.rotation.set(0,0,0);
+        shake=Math.max(shake,0.22);
       }
-      intro.move=17*sweepP*dt;
-      if(T>=2.95) completeIntro();
+      var ao=smooth01(np);
+      agentL.position.z=0.9+1.0*ao; agentR.position.z=1.25+1.0*ao;
+      agentL.position.y=Math.abs(Math.sin(np*9))*0.03; agentR.position.y=Math.abs(Math.cos(np*9))*0.03;
+      [agentL,agentR].forEach(function(ag){
+        if(ag.userData.arms){ ag.userData.arms[0].rotation.x=-1.45*ao; ag.userData.arms[1].rotation.x=-1.45*ao; }
+        if(ag.userData.legs){ ag.userData.legs[0].rotation.x=0.22*ao; ag.userData.legs[1].rotation.x=-0.18*ao; }
+      });
+      var gl=Math.sin(Math.min(1,np*1.25)*Math.PI);
+      alien.position.y=0.02;
+      alien.scale.y=1-0.05*gl;
+      alien.rotation.set(0.03, -0.55*gl, 0);
+      if(alien.userData.legs){ var dk=Math.max(0,1-np*1.6); alien.userData.legs[0].rotation.x*=dk; alien.userData.legs[1].rotation.x*=dk; alien.userData.arms[0].rotation.x*=dk; alien.userData.arms[1].rotation.x*=dk; }
+      if(alien.userData.head) alien.userData.head.rotation.y=-0.45*gl;
+    } else {
+      // RUN — one straight line past the camera; the agents pour out after him
+      var runT=T-3.5;
+      var spP=smooth01(clamp(runT/0.9,0,1));
+      var spd=3+11*spP;
+      alien.position.z+=spd*dt;
+      alien.position.x=0;
+      alien.scale.y += (1-alien.scale.y)*Math.min(1,dt*8);
+      alien.rotation.y += (0-alien.rotation.y)*Math.min(1,dt*7);
+      alien.rotation.x=0.03+0.10*spP;
+      alien.rotation.z=0;
+      intro.runPhase+=dt*(7+6*spP);
+      var rsw=Math.sin(intro.runPhase);
+      alien.position.y=0.02+Math.abs(Math.cos(intro.runPhase))*0.055;
+      if(alien.userData.legs){ alien.userData.legs[0].rotation.x=rsw*0.9; alien.userData.legs[1].rotation.x=-rsw*0.9; alien.userData.arms[0].rotation.x=-rsw*0.8; alien.userData.arms[1].rotation.x=rsw*0.8; }
+      if(alien.userData.head) alien.userData.head.rotation.y*=Math.max(0,1-dt*7);
+      if(runT>=0.16) intro.agentGo=true;
+      if(intro.agentGo){
+        var aspd=spd*0.93;
+        agentL.position.z+=aspd*dt; agentR.position.z+=aspd*dt;
+        var aph=T*11.5;
+        agentL.position.y=Math.abs(Math.sin(aph))*0.06; agentR.position.y=Math.abs(Math.cos(aph))*0.06;
+        introAgentPose(agentL, aph, 0.8); introAgentPose(agentR, aph+0.6, 0.8);
+      }
+      // Once he is well past the camera post, the camera is staring at his
+      // back — mirror the world so the chase continues down the track.
+      if(alien.position.z>=menuCamDist()+4.4) doRebase();
     }
   }
-  function completeIntro(){
+  function doRebase(){
+    var az=alien.position.z;
+    // Mirror across the alien's plane (z -> az - z): the camera's mirrored
+    // transform frames him identically, now from behind, facing down-track.
+    intro.camFrom.set(camera.position.x, camera.position.y, az-camera.position.z);
+    intro.lookFrom.set(0, 1.3, 0);
+    intro.fovFrom=camera.fov;
+    alien.position.set(playerX, 0, 0);
+    agentL.position.z=az-agentL.position.z+1.4; agentR.position.z=az-agentR.position.z+1.4;
+    agentL.rotation.y=Math.PI; agentR.rotation.y=Math.PI;
+    cellGroup.position.z=az;
+    intro.rebased=true;
+    finishIntro();
+  }
+  function finishIntro(){
     if(STATE!=='intro') return;
     introHint.classList.remove('on');
     setCellState('broken');
-    cellMode='broken';
+    cellMode='broken'; cellGroup.visible=true;
+    if(!intro.rebased){
+      // Skipped early: drop the broken cell ahead like a restart and blend
+      // the camera from wherever it is now into the chase framing.
+      cellGroup.position.set(0,0,-9);
+      intro.camFrom.copy(camera.position);
+      intro.lookFrom.set(0,1.3,0);
+      intro.fovFrom=camera.fov;
+      alien.position.set(playerX,0,0);
+      agentL.visible=true; agentR.visible=true;
+      agentL.position.set(-0.85,0,3.9); agentR.position.set(0.85,0,4.35);
+    }
     redLight.intensity=0;
     alien.scale.set(1,1,1);
-    alien.position.set(playerX,0,0);
-    agentL.visible=true; agentR.visible=true;
+    alien.rotation.set(0,Math.PI,0);
+    intro.blend=0;
     STATE='playing';
     hud.classList.add('on');
     showZoneLabel(ZONE_CFG[zone].name);
     if(!tutDone) startTutorial();
   }
-  function skipIntro(){ if(STATE==='intro') completeIntro(); }
+  function skipIntro(){ if(STATE==='intro') finishIntro(); }
 
   // ---------- ALIEN ----------
   function buildAlien(){
@@ -2079,7 +2157,7 @@
   // ---------- MAIN LOOP ----------
   var clock=new THREE.Clock();
   var elapsed=0;
-  var camPos=new THREE.Vector3(0,4.6,7.2), camLook=new THREE.Vector3(0,1.55,-8);
+  var camPos=new THREE.Vector3(0,5.9,9.4), camLook=new THREE.Vector3(0,1.45,-13);
 
   function animate(){
     requestAnimationFrame(animate);
@@ -2275,7 +2353,8 @@
       ufoMesh.position.y+=Math.sin(t*5)*0.05;
     }
 
-    // --- Agents ---
+    // --- Agents (stepIntro drives them during the intro) ---
+    if(STATE!=='intro'){
     var agentZ = 1.2 + agentGap;
     var aBob=Math.abs(Math.sin(bobPhase*1.02))*0.07;
     agentL.position.z += (agentZ+0.25 - agentL.position.z)*Math.min(1,dt*3.5);
@@ -2290,6 +2369,7 @@
       if(ag.userData.legs){ ag.userData.legs[0].rotation.x=Math.sin(ph)*0.8; ag.userData.legs[1].rotation.x=-Math.sin(ph)*0.8; ag.userData.arms[0].rotation.x=-Math.sin(ph)*0.7; ag.userData.arms[1].rotation.x=Math.sin(ph)*0.7; }
     });
     if(STATE==='over'){ agentL.position.z=Math.max(agentL.position.z-dt*3, 1.0); agentR.position.z=Math.max(agentR.position.z-dt*3, 1.4); }
+    }
 
     // --- Scenery (formula positions) ---
     for(var si2=0; si2<scenery.length; si2++){
@@ -2421,31 +2501,25 @@
       camera.lookAt(camLook);
       if(Math.abs(camera.fov-50)>0.05){ camera.fov += (50-camera.fov)*Math.min(1,rawDt*3); camera.updateProjectionMatrix(); }
     } else if(STATE==='intro'){
-      var iT=intro.t, mD=menuCamDist(), mLY=menuLookY();
-      if(iT<1.2){
-        var push=clamp(iT/1.2,0,1);
+      var mD=menuCamDist(), mLY=menuLookY();
+      if(intro.t<1.2){
+        var push=clamp(intro.t/1.2,0,1);
         camera.position.set(Math.sin(t*0.3)*0.2+shakeX, 1.72-0.06*push+shakeY, mD-0.55*push);
         camera.lookAt(0, mLY, 0);
         var aFov=menuFov();
         if(Math.abs(camera.fov-aFov)>0.05){ camera.fov += (aFov-camera.fov)*Math.min(1,rawDt*4); camera.updateProjectionMatrix(); }
       } else {
-        // Burst + sweep: one continuous move from the cell framing into the chase view
-        var runP2=clamp((iT-1.2)/0.65,0,1);
-        var swp=smooth01(clamp((iT-1.85)/1.05,0,1));
-        var yA=1.66, zA=mD-0.55+0.2*runP2;
-        camera.position.set(
-          -Math.sin(swp*Math.PI)*3.4+shakeX,
-          yA+(4.55-yA)*swp+shakeY,
-          zA+(7.3-zA)*swp
-        );
-        var lookY2=mLY+(1.25-mLY)*runP2;
-        camera.lookAt(
-          alien.position.x*(1-swp) + (playerX*0.65)*swp,
-          lookY2*(1-swp) + 1.55*swp,
-          alien.position.z*(1-swp) + (-8)*swp
-        );
-        var iFov=menuFov()+(68-menuFov())*swp;
-        if(Math.abs(camera.fov-iFov)>0.05){ camera.fov += (iFov-camera.fov)*Math.min(1,rawDt*5); camera.updateProjectionMatrix(); }
+        // On its post: the position locks (nudged sideways so he can pass the
+        // lens) and the camera PANS in place, tracking him out the door, past
+        // the camera, and away until it is staring at his back.
+        var postX=1.15*smooth01(clamp((intro.t-1.1)/0.5,0,1));
+        camera.position.set(postX+shakeX, 1.70+shakeY, mD-0.55);
+        var tk=Math.min(1, rawDt*6), tkz=Math.min(1, rawDt*9);
+        introTrack.x += (alien.position.x-introTrack.x)*tk;
+        introTrack.y += (1.25-introTrack.y)*tk;
+        introTrack.z += (alien.position.z-introTrack.z)*tkz;
+        camera.lookAt(introTrack.x, introTrack.y, introTrack.z);
+        if(Math.abs(camera.fov-68)>0.05){ camera.fov += (68-camera.fov)*Math.min(1,rawDt*3); camera.updateProjectionMatrix(); }
       }
       greenLight.position.set(alien.position.x, 2.0, alien.position.z+1.6);
     } else if(camMode==='cell'){
@@ -2457,15 +2531,33 @@
       if(Math.abs(camera.fov-cFov)>0.05){ camera.fov += (cFov-camera.fov)*Math.min(1,rawDt*3); camera.updateProjectionMatrix(); }
       greenLight.position.set(0, 2.2, 2.4);
     } else {
+      // Chase framing: high and pulled back, tilted down the track past him —
+      // the alien rides in the lower third and the road ahead owns the frame.
+      // Portrait phones (the priority view) get extra height and distance.
       var camBob = STATE==='playing' ? Math.sin(bobPhase*2)*0.05 : Math.sin(t*1.4)*0.04;
-      var lx=playerX*0.42 + shakeX, ly=4.55 + floorY*0.85 + camBob + shakeY + playerY*0.18, lz3=7.3;
+      var asp2=camera.aspect||1;
+      var chaseY=asp2>=1?5.9:6.5, chaseZ=asp2>=1?9.4:10.6, chaseLookY=asp2>=1?1.45:1.35;
+      var lx=playerX*0.42 + shakeX, ly=chaseY + floorY*0.85 + camBob + shakeY + playerY*0.18, lz3=chaseZ;
       var ca=Math.cos(bend.angle), sa=Math.sin(bend.angle);
-      camera.position.set(lx*ca + lz3*sa, ly, -lx*sa + lz3*ca);
-      var tx=playerX*0.65, tz=-8;
-      camera.lookAt(tx*ca + tz*sa, 1.55 + floorY*0.85, -tx*sa + tz*ca);
-      if(Math.abs(bend.angle)>0.001) camera.rotateZ(Math.sin(Math.abs(bend.angle)/(Math.PI/2)*Math.PI)*0.10*(bend.angle>0?1:-1));
+      var cpx=lx*ca + lz3*sa, cpy=ly, cpz=-lx*sa + lz3*ca;
+      var tx=playerX*0.65, tz=-13;
+      var clx=tx*ca + tz*sa, cly=chaseLookY + floorY*0.85, clz=-tx*sa + tz*ca;
       var targetFov = 68 + (STATE==='playing' ? (speed-17)*0.32 : 0) + (boostT>0?5:0);
-      if(Math.abs(camera.fov-targetFov)>0.05){ camera.fov += (targetFov-camera.fov)*Math.min(1,rawDt*3); camera.updateProjectionMatrix(); }
+      if(intro.blend<1){
+        // Intro settle: ease from the mirrored pan position into the chase
+        // framing, then stop — gameplay owns the camera from here.
+        intro.blend=Math.min(1, intro.blend+rawDt/0.65);
+        var bk=smooth01(intro.blend);
+        camera.position.set(intro.camFrom.x+(cpx-intro.camFrom.x)*bk, intro.camFrom.y+(cpy-intro.camFrom.y)*bk, intro.camFrom.z+(cpz-intro.camFrom.z)*bk);
+        camera.lookAt(intro.lookFrom.x+(clx-intro.lookFrom.x)*bk, intro.lookFrom.y+(cly-intro.lookFrom.y)*bk, intro.lookFrom.z+(clz-intro.lookFrom.z)*bk);
+        var bFov=intro.fovFrom+(targetFov-intro.fovFrom)*bk;
+        if(Math.abs(camera.fov-bFov)>0.05){ camera.fov=bFov; camera.updateProjectionMatrix(); }
+      } else {
+        camera.position.set(cpx, cpy, cpz);
+        camera.lookAt(clx, cly, clz);
+        if(Math.abs(bend.angle)>0.001) camera.rotateZ(Math.sin(Math.abs(bend.angle)/(Math.PI/2)*Math.PI)*0.10*(bend.angle>0?1:-1));
+        if(Math.abs(camera.fov-targetFov)>0.05){ camera.fov += (targetFov-camera.fov)*Math.min(1,rawDt*3); camera.updateProjectionMatrix(); }
+      }
       var glx=playerX, glz=1.5;
       greenLight.position.set(glx*ca + glz*sa, 1.6+floorY+playerY, -glx*sa + glz*ca);
       var rlx=playerX, rlz=agentL.position.z;
