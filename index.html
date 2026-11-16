@@ -434,7 +434,7 @@
   scene.fog=new THREE.Fog(0x0a0c10, 26, 85);
 
   var camera=new THREE.PerspectiveCamera(68, window.innerWidth/window.innerHeight, 0.1, 300);
-  camera.position.set(0, 5.9, 9.4);
+  camera.position.set(0, 6.9, 10.0);
 
   var ambient=new THREE.AmbientLight(0xffd9a0, 0.5); scene.add(ambient);
   var hemi=new THREE.HemisphereLight(0xbdd3ff, 0x1a2418, 0.35); scene.add(hemi);
@@ -2531,18 +2531,27 @@
       if(Math.abs(camera.fov-cFov)>0.05){ camera.fov += (cFov-camera.fov)*Math.min(1,rawDt*3); camera.updateProjectionMatrix(); }
       greenLight.position.set(0, 2.2, 2.4);
     } else {
-      // Chase framing: high and pulled back, tilted down the track past him —
-      // the alien rides in the lower third and the road ahead owns the frame.
-      // Portrait phones (the priority view) get extra height and distance.
+      // Chase framing: the camera sits well above the alien's head and aims
+      // DOWN at the track just ahead of him (~17–18° downward pitch) — you
+      // see the top of his head and shoulders, he rides in the lower part of
+      // the frame, the road surface ahead fills the middle of the screen,
+      // and the horizon sits high. Portrait phones (the priority view) get
+      // extra height and distance.
       var camBob = STATE==='playing' ? Math.sin(bobPhase*2)*0.05 : Math.sin(t*1.4)*0.04;
       var asp2=camera.aspect||1;
-      var chaseY=asp2>=1?5.9:6.5, chaseZ=asp2>=1?9.4:10.6, chaseLookY=asp2>=1?1.45:1.35;
+      var chaseY=asp2>=1?6.9:7.2, chaseZ=asp2>=1?10.0:11.0, chaseLookY=asp2>=1?0.0:-0.1;
+      var targetFov = 68 + (STATE==='playing' ? (speed-17)*0.32 : 0) + (boostT>0?5:0);
       var lx=playerX*0.42 + shakeX, ly=chaseY + floorY*0.85 + camBob + shakeY + playerY*0.18, lz3=chaseZ;
+      // In the roofed zones, keep the raised camera (incl. UFO lift) just
+      // under the ceiling plane so it never pokes through the roof.
+      if(ceilingMesh.visible) ly=Math.min(ly, 7.35);
       var ca=Math.cos(bend.angle), sa=Math.sin(bend.angle);
       var cpx=lx*ca + lz3*sa, cpy=ly, cpz=-lx*sa + lz3*ca;
-      var tx=playerX*0.65, tz=-13;
-      var clx=tx*ca + tz*sa, cly=chaseLookY + floorY*0.85, clz=-tx*sa + tz*ca;
-      var targetFov = 68 + (STATE==='playing' ? (speed-17)*0.32 : 0) + (boostT>0?5:0);
+      // Aim at the track surface ahead of him, not at his eye line. As the
+      // speed FOV widens, drop the aim a touch further so the downward
+      // pitch holds instead of the wider lens flattening the view.
+      var tx=playerX*0.65, tz=-12;
+      var clx=tx*ca + tz*sa, cly=chaseLookY - (targetFov-68)*0.06 + floorY*0.85, clz=-tx*sa + tz*ca;
       if(intro.blend<1){
         // Intro settle: ease from the mirrored pan position into the chase
         // framing, then stop — gameplay owns the camera from here.
